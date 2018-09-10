@@ -1,0 +1,22 @@
+[package]
+name = "hebb"
+version = "0.0.0"
+authors = ["Peter Jin <peterhaijin@gmail.com>"]
+
+[lib]
+name = "hebb"
+path = "src/lib.rs"
+
+[features]
+default = []
+gpu = []
+
+#[build-dependencies]
+
+#[dev-dependencies]
+
+[dependencies]
+lazy_static = "*"
+#num-traits = "^0.2"
+parking_lot = { version = "^0.5", features = ["nightly"] }
+#rand = "^0.5"
