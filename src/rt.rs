@@ -92,6 +92,8 @@ fn next_uid() -> u64 {
   })
 }
 
+pub struct Pass(u64);
+
 pub struct Txn(u64);
 
 pub fn txn() -> Txn {
@@ -164,14 +166,14 @@ impl OptimizeHint {
 }
 
 #[derive(Clone, Copy)]
-pub enum HeapObjType {
+pub enum HeapObjKind {
   THeap,
   RWData,
   Thunk,
 }
 
-pub trait HeapObj {
-  fn _obj_type(&self) -> HeapObjType;
+pub trait HeapObj: Any {
+  fn _obj_kind(&self) -> HeapObjKind;
 }
 
 pub trait Placement {
@@ -186,7 +188,7 @@ pub struct FrameRef<'scope> {
 
 pub struct THeap {
   stable:   STag,
-  objs:     HashMap<STag, Rc<dyn Any>>,
+  objs:     HashMap<STag, Rc<dyn HeapObj>>,
 }
 
 impl THeap {
@@ -205,13 +207,15 @@ impl THeap {
 }
 
 impl HeapObj for THeap {
-  fn _obj_type(&self) -> HeapObjType {
-    HeapObjType::THeap
+  fn _obj_kind(&self) -> HeapObjKind {
+    HeapObjKind::THeap
   }
 }
 
-/*pub struct RWDataRef<V> {
-}*/
+pub struct LDataRef<V> {
+  stable:   STag,
+  _mrk:     PhantomData<V>,
+}
 
 pub struct RWData<V> {
   // TODO
@@ -221,9 +225,9 @@ pub struct RWData<V> {
   plc:      Option<Rc<dyn Placement>>,
 }
 
-impl<V> HeapObj for RWData<V> {
-  fn _obj_type(&self) -> HeapObjType {
-    HeapObjType::RWData
+impl<V: 'static> HeapObj for RWData<V> {
+  fn _obj_kind(&self) -> HeapObjKind {
+    HeapObjKind::RWData
   }
 }
 
@@ -239,7 +243,7 @@ pub struct RWDataCode<V> {
 }*/
 
 pub struct ThunkRef<V> {
-  tag:      Tag,
+  ref_:     Tag,
   _mrk:     PhantomData<V>,
 }
 
@@ -276,17 +280,17 @@ pub struct Thunk<V> {
   plc:      Option<Rc<dyn Placement>>,
 }
 
-impl<V> HeapObj for Thunk<V> {
-  fn _obj_type(&self) -> HeapObjType {
-    HeapObjType::Thunk
+impl<V: 'static> HeapObj for Thunk<V> {
+  fn _obj_kind(&self) -> HeapObjKind {
+    HeapObjKind::Thunk
   }
 }
 
 pub struct ThunkCode<V> {
   // TODO
   alloc:    Option<Arc<Fn(Txn) -> V>>,
-  entry:    Option<Box<Fn(Txn, /*LVal<V>*/) -> bool>>,
-  adjoint:  Option<Box<Fn(/*Pass,*/ Thunk<V>, &mut Sink)>>,
+  entry:    Option<Box<Fn(Txn, LDataRef<V>) -> bool>>,
+  adjoint:  Option<Box<Fn(Pass, ThunkRef<V>, &mut Sink)>>,
 }
 
 /*pub trait ThunkPlacement {
