@@ -103,7 +103,12 @@ pub fn txn() -> Txn {
   Txn(next_uid())
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub struct Sym {
+  u:        String,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct STag {
   uid:      u64,
 }
@@ -128,7 +133,7 @@ impl STag {
   }*/
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(PartialEq, Eq, Hash, Debug)]
 pub struct RTag {
   uid:      u64,
 }
@@ -137,9 +142,13 @@ impl RTag {
   fn new() -> RTag {
     RTag{uid: next_uid()}
   }
+
+  pub fn _clone_exact(&self) -> RTag {
+    RTag{uid: self.uid}
+  }
 }
 
-#[derive(PartialEq, Eq, Hash)]
+#[derive(PartialEq, Eq, Hash, Debug)]
 pub struct Tag {
   stable:   STag,
   retain:   RTag,
@@ -163,9 +172,12 @@ impl Tag {
   pub fn _clone_exact(&self) -> Tag {
     Tag{
       stable:   self.stable,
-      retain:   self.retain,
+      retain:   self.retain._clone_exact(),
     }
   }
+}
+
+pub trait Placement {
 }
 
 //#[derive(Clone)]
@@ -216,9 +228,6 @@ pub trait HeapObj: Any {
   fn _obj_kind(&self) -> HeapObjKind;
 }
 
-pub trait Placement {
-}
-
 pub struct FrameRef<'scope> {
   // TODO: reference to the frame heap, which can also be in the global heap.
   stable:   STag,
@@ -226,10 +235,25 @@ pub struct FrameRef<'scope> {
   _mrk:     PhantomData<&'scope ()>,
 }
 
+pub struct HeapEntry {
+  sym:      Option<Sym>,
+  content:  Rc<dyn Any>,
+  //content:  Rc<dyn HeapObj>,
+}
+
+impl HeapEntry {
+  pub fn anonymous<Obj: 'static>(obj: Obj) -> HeapEntry {
+    HeapEntry{
+      sym:      None,
+      content:  Rc::new(obj),
+    }
+  }
+}
+
 pub struct Heap {
   stable:   STag,
-  objs:     HashMap<STag, Rc<dyn Any>>,
-  //objs:     HashMap<STag, Rc<dyn HeapObj>>,
+  objs:     HashMap<STag, HeapEntry>,
+  syms:     HashMap<Sym, STag>,
 }
 
 impl Heap {
@@ -237,6 +261,7 @@ impl Heap {
     Heap{
       stable:   STag::new(),
       objs:     HashMap::new(),
+      syms:     HashMap::new(),
     }
   }
 
@@ -244,6 +269,7 @@ impl Heap {
     Heap{
       stable:   STag{uid: 0},
       objs:     HashMap::new(),
+      syms:     HashMap::new(),
     }
   }
 }
@@ -273,8 +299,8 @@ impl<V> LDataRef<V> {
 impl<V: 'static> LDataRef<V> {
   pub fn _get_obj(&self) -> LData<V> {
     let data_obj = HEAP.with(|heap| {
-      let mut heap = heap.borrow_mut();
-      heap.objs[&self.stable].clone()
+      let heap = heap.borrow();
+      heap.objs[&self.stable].content.clone()
     });
     if let Some(ref data) = (&*data_obj).downcast_ref::<Data<V>>() {
       let cloned_data = data._clone_exact();
@@ -352,7 +378,7 @@ impl<V: 'static> Data<V> {
       let stable = self.stable;
       //let retain = RTag::new();
       let mut heap = heap.borrow_mut();
-      heap.objs.insert(stable, Rc::new(self));
+      heap.objs.insert(stable, HeapEntry::anonymous(self));
       /*ThunkRef{
         tag:    Tag{stable, retain},
         _mrk:   PhantomData,
@@ -437,7 +463,7 @@ impl<V> Default for DataCell<V> {
 }
 
 pub struct DataCode<V> {
-  alloc:    Option<Arc<Fn(Txn) -> V>>,
+  pub alloc:    Option<Arc<Fn(Txn) -> V>>,
 }
 
 impl<V> Clone for DataCode<V> {
@@ -485,7 +511,7 @@ impl<V: 'static> ThunkRef<V> {
   pub fn _get_obj(&self) -> RThunk<V> {
     let thunk_obj = HEAP.with(|heap| {
       let mut heap = heap.borrow_mut();
-      heap.objs[&self.tag.stable].clone()
+      heap.objs[&self.tag.stable].content.clone()
     });
     if let Some(ref thunk) = (&*thunk_obj).downcast_ref::<Thunk<V>>() {
       let cloned_thunk = thunk._clone_exact();
@@ -494,7 +520,7 @@ impl<V: 'static> ThunkRef<V> {
         Some(s) => {
           let data_obj = HEAP.with(|heap| {
             let mut heap = heap.borrow_mut();
-            heap.objs[&s].clone()
+            heap.objs[&s].content.clone()
           });
           if let Some(ref data) = (&*data_obj).downcast_ref::<Data<V>>() {
             let cloned_data = data._clone_exact();
@@ -520,7 +546,7 @@ impl<V: 'static> ThunkRef<V> {
   pub fn force_eval(&self, txn: Txn) {
     let obj = HEAP.with(|heap| {
       let heap = heap.borrow();
-      heap.objs[&self.tag.stable].clone()
+      heap.objs[&self.tag.stable].content.clone()
     });
     if let Some(ref thunk) = (&*obj).downcast_ref::<Thunk<V>>() {
       println!("ThunkRef: force_eval: success");
@@ -633,7 +659,7 @@ impl<V: 'static> Thunk<V> {
       let stable = self.stable;
       let retain = RTag::new();
       let mut heap = heap.borrow_mut();
-      heap.objs.insert(stable, Rc::new(self));
+      heap.objs.insert(stable, HeapEntry::anonymous(self));
       ThunkRef{
         tag:    Tag{stable, retain},
         _mrk:   PhantomData,
@@ -665,9 +691,9 @@ impl<V: 'static> Thunk<V> {
 
 pub struct ThunkCode<V> {
   // TODO
-  //alloc:    Option<Arc<Fn(Txn) -> V>>,
-  entry:    Option<Arc<Fn(Txn, LData<V>) -> bool>>,
-  adjoint:  Option<Arc<Fn(Pass, ThunkRef<V>, &mut Sink)>>,
+  //pub alloc:    Option<Arc<Fn(Txn) -> V>>,
+  pub entry:    Option<Arc<Fn(Txn, LData<V>) -> bool>>,
+  pub adjoint:  Option<Arc<Fn(Pass, ThunkRef<V>, &mut Sink)>>,
 }
 
 impl<V> Clone for ThunkCode<V> {
