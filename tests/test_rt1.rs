@@ -1,9 +1,9 @@
 extern crate hebb;
 
-use hebb::rt::*;
+use hebb::experimental::rt1::*;
 
 #[test]
-fn test_add() {
+fn test_rt1_add() {
   // TODO
   let x1 = constant_op(1.0_f32);
   let x2 = constant_op(2.0_f32);
@@ -16,7 +16,7 @@ fn test_add() {
 }
 
 #[test]
-fn test_switch() {
+fn test_rt1_switch() {
   // TODO
   let c = constant_op(true);
   let x1 = constant_op(1.0_f32);
